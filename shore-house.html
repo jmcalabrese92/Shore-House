@@ -1,0 +1,991 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<title>Shore House</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=Lato:wght@300;400;700&display=swap" rel="stylesheet">
+
+<!-- ============================================================
+     FIREBASE SETUP — FILL IN YOUR CREDENTIALS HERE
+     
+     1. Go to https://console.firebase.google.com
+     2. Create a new project (or use existing)
+     3. Click "Add app" → Web app
+     4. Copy the firebaseConfig object values below
+     5. Go to Build → Realtime Database → Create database
+     6. Set rules to:
+        { "rules": { ".read": true, ".write": true } }
+     ============================================================ -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+  import { getDatabase, ref, onValue, set, update } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyAUaf53h7A0sDZBV6hk63IBPJSkIjJgP-M",
+    authDomain: "shore-house-adffe.firebaseapp.com",
+    databaseURL: "https://shore-house-adffe-default-rtdb.firebaseio.com",
+    projectId: "shore-house-adffe",
+    storageBucket: "shore-house-adffe.firebasestorage.app",
+    messagingSenderId: "195343178767",
+    appId: "1:195343178767:web:854cb1d55334ce42d2d77a",
+    measurementId: "G-MW3ZLBP6EB"
+  };
+
+  // ============================================================
+  // APP DATA
+  // ============================================================
+
+  const COUPLES = [
+    { id: "parents",  label: "Mom & Dad",      rooms: 1, locked: true  },
+    { id: "rob",      label: "Rob & Jess",     rooms: 3, locked: false },
+    { id: "erin",     label: "Erin & Mike",    rooms: 2, locked: false },
+    { id: "lauren",   label: "Lauren & Oscar", rooms: 1, locked: false },
+    { id: "justin",   label: "Justin & Alex",  rooms: 1, locked: false },
+    { id: "connor",   label: "Connor & Sophie",rooms: 1, locked: false },
+  ];
+
+  const TOTAL_ROOMS = 12;
+
+  // Generate weekends Memorial Day → Labor Day
+  function generateWeekends() {
+    const weekends = [];
+    // Memorial Day 2025 = May 23
+    const start = new Date(2025, 4, 23);
+    // Labor Day 2025 = Aug 29 (Fri before)
+    const end = new Date(2025, 8, 5);
+    let d = new Date(start);
+    const dayNames = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+    const monNames = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    while (d <= end) {
+      // Find Friday of this weekend
+      let fri = new Date(d);
+      // d is always a Friday start
+      let sun = new Date(fri);
+      sun.setDate(fri.getDate() + 2);
+      const label = `${monNames[fri.getMonth()]} ${fri.getDate()}–${sun.getDate()}`;
+      const isMemorial = weekends.length === 0;
+      const isLabor = fri >= new Date(2025, 8, 5);
+      weekends.push({
+        id: `wk_${fri.toISOString().slice(0,10)}`,
+        label,
+        fri: fri.toISOString().slice(0,10),
+        badge: isMemorial ? "Memorial Day" : isLabor ? "Labor Day" : null,
+      });
+      d.setDate(d.getDate() + 7);
+    }
+    return weekends;
+  }
+
+  // Adjust to start on Fridays
+  function generateWeekendsFixed() {
+    const weekends = [];
+    const monNames = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep"];
+    const starts = [];
+    // Memorial Day 2026 = May 25 (Monday), so weekend starts Fri May 22
+    let d = new Date(2026, 4, 22); // May 22, 2026 - Friday
+    // Labor Day 2026 = Sep 7 (Monday), so weekend starts Fri Sep 4
+    const labor = new Date(2026, 8, 4); // Sep 4, 2026 - Friday
+    while (d <= labor) {
+      starts.push(new Date(d));
+      d.setDate(d.getDate() + 7);
+    }
+    starts.forEach((fri, i) => {
+      const sun = new Date(fri);
+      sun.setDate(fri.getDate() + 2);
+      const isMemorial = i === 0;
+      const isLabor = i === starts.length - 1;
+      const friStr = `${monNames[fri.getMonth()]} ${fri.getDate()}`;
+      const sunStr = `${sun.getDate()}`;
+      const label = `${friStr}–${sunStr}`;
+      weekends.push({
+        id: `wk_${fri.toISOString().slice(0,10)}`,
+        label,
+        badge: isMemorial ? "Memorial Day" : isLabor ? "Labor Day" : null,
+      });
+    });
+    return weekends;
+  }
+
+  const WEEKENDS = generateWeekendsFixed();
+
+  // ============================================================
+  // STATE
+  // ============================================================
+  let db;
+  let currentUser = localStorage.getItem("shoreHouseUser") || null;
+  let appData = {}; // live from Firebase
+  let isFirebaseConnected = false;
+
+  // ============================================================
+  // FIREBASE INIT
+  // ============================================================
+  try {
+    const app = initializeApp(firebaseConfig);
+    db = getDatabase(app);
+    isFirebaseConnected = true;
+
+    const dataRef = ref(db, "shoreHouse2026");
+    onValue(dataRef, (snapshot) => {
+      appData = snapshot.val() || {};
+      renderGrid();
+    });
+  } catch(e) {
+    console.warn("Firebase not configured yet — running in demo mode", e);
+    isFirebaseConnected = false;
+    renderGrid();
+  }
+
+  // ============================================================
+  // WRITE HELPERS
+  // ============================================================
+  function setStatus(weekendId, coupleId, status) {
+    if (!isFirebaseConnected) {
+      appData[weekendId] = appData[weekendId] || {};
+      appData[weekendId].statuses = appData[weekendId].statuses || {};
+      appData[weekendId].statuses[coupleId] = status;
+      renderGrid();
+      return;
+    }
+    const r = ref(db, `shoreHouse2026/${weekendId}/statuses/${coupleId}`);
+    set(r, status);
+  }
+
+  function addGuest(weekendId, name) {
+    const key = Date.now();
+    if (!isFirebaseConnected) {
+      appData[weekendId] = appData[weekendId] || {};
+      appData[weekendId].guests = appData[weekendId].guests || {};
+      appData[weekendId].guests[key] = { name, addedBy: currentUser };
+      renderGrid();
+      closeModal();
+      return;
+    }
+    const r = ref(db, `shoreHouse2026/${weekendId}/guests/${key}`);
+    set(r, { name, addedBy: currentUser });
+    closeModal();
+  }
+
+  function removeGuest(weekendId, guestKey) {
+    if (!isFirebaseConnected) {
+      delete appData[weekendId].guests[guestKey];
+      renderGrid();
+      return;
+    }
+    const r = ref(db, `shoreHouse2026/${weekendId}/guests/${guestKey}`);
+    set(r, null);
+  }
+
+  // ============================================================
+  // COMPUTED
+  // ============================================================
+  function getRoomsUsed(weekendId) {
+    const statuses = (appData[weekendId] || {}).statuses || {};
+    let rooms = 1; // parents always count
+    COUPLES.filter(c => !c.locked).forEach(c => {
+      if (statuses[c.id] === "yes") rooms += c.rooms;
+    });
+    return rooms;
+  }
+
+  function getGuests(weekendId) {
+    return (appData[weekendId] || {}).guests || {};
+  }
+
+  function getStatus(weekendId, coupleId) {
+    return ((appData[weekendId] || {}).statuses || {})[coupleId] || "tbd";
+  }
+
+  // ============================================================
+  // RENDER
+  // ============================================================
+  function renderGrid() {
+    const container = document.getElementById("app");
+    if (!container) return;
+
+    if (!currentUser) {
+      renderUserPicker(container);
+      return;
+    }
+
+    const activeCouples = COUPLES.filter(c => !c.locked);
+
+    let html = `
+      <header>
+        <div class="header-inner">
+          <div class="header-top">
+            <div class="title-block">
+              <div class="wave-line">〰〰〰</div>
+              <h1>Shore House</h1>
+              <div class="subtitle">Summer 2026</div>
+            </div>
+            <button class="user-btn" onclick="switchUser()">
+              <span class="user-avatar">${getInitials(currentUser)}</span>
+              <span class="user-name">${getLabelById(currentUser)}</span>
+              <span class="caret">▾</span>
+            </button>
+          </div>
+          ${!isFirebaseConnected ? `<div class="demo-banner">⚠️ Demo Mode — add Firebase credentials to sync across devices</div>` : ''}
+        </div>
+      </header>
+
+      <main>
+        <div class="legend">
+          <span class="leg yes">✓ Coming</span>
+          <span class="leg no">✗ Not Coming</span>
+          <span class="leg tbd">? TBD</span>
+        </div>
+
+        <div class="weekends-list">
+    `;
+
+    WEEKENDS.forEach(wk => {
+      const roomsUsed = getRoomsUsed(wk.id);
+      const roomPct = Math.min(roomsUsed / TOTAL_ROOMS, 1);
+      const roomColor = roomsUsed >= TOTAL_ROOMS ? '#e05a5a' : roomsUsed >= 10 ? '#e8a44b' : '#4a9b78';
+      const guests = getGuests(wk.id);
+      const guestList = Object.entries(guests);
+
+      html += `
+        <div class="weekend-card ${wk.badge ? 'has-badge' : ''}">
+          <div class="weekend-header">
+            <div class="weekend-date">
+              ${wk.badge ? `<span class="holiday-badge">${wk.badge}</span>` : ''}
+              <span class="date-label">${wk.label}</span>
+            </div>
+            <div class="room-meter">
+              <div class="room-bar-wrap">
+                <div class="room-bar" style="width:${roomPct*100}%; background:${roomColor}"></div>
+              </div>
+              <span class="room-count" style="color:${roomColor}">${roomsUsed}/${TOTAL_ROOMS} rooms</span>
+            </div>
+          </div>
+
+          <div class="couples-grid">
+      `;
+
+      activeCouples.forEach(couple => {
+        const status = getStatus(wk.id, couple.id);
+        const isMe = couple.id === currentUser;
+        html += `
+          <div class="couple-cell ${isMe ? 'is-me' : ''}">
+            <div class="couple-name">${couple.label.split(' & ')[0]}<br><span class="amp">&</span> ${couple.label.split(' & ')[1]}</div>
+            <div class="status-btns">
+              <button class="status-btn ${status === 'yes' ? 'active yes' : ''}" 
+                onclick="setStatusUI('${wk.id}','${couple.id}','yes')" 
+                ${!isMe ? 'disabled' : ''} title="Coming">✓</button>
+              <button class="status-btn ${status === 'no' ? 'active no' : ''}" 
+                onclick="setStatusUI('${wk.id}','${couple.id}','no')" 
+                ${!isMe ? 'disabled' : ''} title="Not Coming">✗</button>
+              <button class="status-btn ${status === 'tbd' ? 'active tbd' : ''}" 
+                onclick="setStatusUI('${wk.id}','${couple.id}','tbd')" 
+                ${!isMe ? 'disabled' : ''} title="TBD">?</button>
+            </div>
+          </div>
+        `;
+      });
+
+      html += `</div>`; // end couples-grid
+
+      // Guests section
+      html += `<div class="guests-section">`;
+      if (guestList.length > 0) {
+        html += `<div class="guest-chips">`;
+        guestList.forEach(([key, g]) => {
+          html += `<span class="guest-chip">${g.name} <button class="guest-remove" onclick="removeGuestUI('${wk.id}','${key}')">×</button></span>`;
+        });
+        html += `</div>`;
+      }
+      html += `<button class="add-guest-btn" onclick="openGuestModal('${wk.id}','${wk.label}')">+ Add Guest</button>`;
+      html += `</div>`;
+
+      html += `</div>`; // end weekend-card
+    });
+
+    html += `</div></main>`;
+
+    // Modal
+    html += `
+      <div id="modal-overlay" class="modal-overlay" onclick="closeModal()">
+        <div class="modal" onclick="event.stopPropagation()">
+          <div id="modal-content"></div>
+        </div>
+      </div>
+    `;
+
+    container.innerHTML = html;
+  }
+
+  function renderUserPicker(container) {
+    const activeCouples = COUPLES.filter(c => !c.locked);
+    container.innerHTML = `
+      <div class="picker-screen">
+        <div class="picker-inner">
+          <div class="wave-line large">〰〰〰〰〰</div>
+          <h1 class="picker-title">Shore House</h1>
+          <p class="picker-sub">Summer 2026</p>
+          <p class="picker-prompt">Who are you?</p>
+          <div class="picker-grid">
+            ${activeCouples.map(c => `
+              <button class="picker-btn" onclick="selectUser('${c.id}')">
+                <span class="picker-initials">${getInitials(c.id)}</span>
+                <span class="picker-label">${c.label}</span>
+              </button>
+            `).join('')}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  // ============================================================
+  // UI HANDLERS (exposed globally)
+  // ============================================================
+  window.setStatusUI = function(weekendId, coupleId, status) {
+    setStatus(weekendId, coupleId, status);
+  };
+
+  window.openGuestModal = function(weekendId, label) {
+    document.getElementById('modal-overlay').classList.add('open');
+    document.getElementById('modal-content').innerHTML = `
+      <h3 class="modal-title">Add Guest</h3>
+      <p class="modal-wk">${label}</p>
+      <input id="guest-input" class="guest-input" type="text" placeholder="Guest name..." autofocus>
+      <div class="modal-btns">
+        <button class="modal-cancel" onclick="closeModal()">Cancel</button>
+        <button class="modal-confirm" onclick="submitGuest('${weekendId}')">Add</button>
+      </div>
+    `;
+    setTimeout(() => document.getElementById('guest-input')?.focus(), 100);
+  };
+
+  window.submitGuest = function(weekendId) {
+    const val = document.getElementById('guest-input')?.value.trim();
+    if (val) addGuest(weekendId, val);
+  };
+
+  window.closeModal = function() {
+    document.getElementById('modal-overlay')?.classList.remove('open');
+  };
+
+  window.removeGuestUI = function(weekendId, key) {
+    removeGuest(weekendId, key);
+  };
+
+  window.selectUser = function(id) {
+    currentUser = id;
+    localStorage.setItem("shoreHouseUser", id);
+    renderGrid();
+  };
+
+  window.switchUser = function() {
+    currentUser = null;
+    localStorage.removeItem("shoreHouseUser");
+    renderGrid();
+  };
+
+  // Handle Enter key in guest modal
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Enter') {
+      const input = document.getElementById('guest-input');
+      if (input && document.activeElement === input) {
+        const wkId = input.dataset.wkid;
+        // find from onclick
+        document.querySelector('.modal-confirm')?.click();
+      }
+    }
+    if (e.key === 'Escape') closeModal();
+  });
+
+  // ============================================================
+  // HELPERS
+  // ============================================================
+  function getLabelById(id) {
+    return COUPLES.find(c => c.id === id)?.label || id;
+  }
+
+  function getInitials(id) {
+    const label = getLabelById(id);
+    const parts = label.split(' & ');
+    return (parts[0][0] + (parts[1]?.[0] || '')).toUpperCase();
+  }
+
+  // Initial render
+  renderGrid();
+</script>
+
+<style>
+  :root {
+    --navy: #1a2e4a;
+    --navy-light: #243d60;
+    --sand: #f5ede0;
+    --sand-dark: #e8d9c4;
+    --cream: #faf6f0;
+    --coral: #d95f3b;
+    --teal: #3a8a7a;
+    --gold: #c8953a;
+    --yes: #3a8a7a;
+    --yes-bg: #d4ede8;
+    --no: #c44a3a;
+    --no-bg: #f0d8d5;
+    --tbd: #b8882a;
+    --tbd-bg: #f0e4c8;
+    --text: #2a3040;
+    --muted: #7a8599;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Lato', sans-serif;
+    background: var(--cream);
+    color: var(--text);
+    min-height: 100vh;
+    background-image: 
+      url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23c8953a' fill-opacity='0.04'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+  }
+
+  /* HEADER */
+  header {
+    background: var(--navy);
+    color: white;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    box-shadow: 0 4px 20px rgba(26,46,74,0.3);
+  }
+
+  .header-inner {
+    max-width: 680px;
+    margin: 0 auto;
+    padding: 14px 16px 12px;
+  }
+
+  .header-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .wave-line {
+    color: var(--gold);
+    font-size: 10px;
+    letter-spacing: 2px;
+    margin-bottom: 2px;
+    opacity: 0.7;
+  }
+
+  h1 {
+    font-family: 'Playfair Display', serif;
+    font-size: 26px;
+    font-weight: 900;
+    letter-spacing: -0.5px;
+    line-height: 1;
+  }
+
+  .subtitle {
+    font-size: 11px;
+    font-weight: 300;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: var(--sand-dark);
+    margin-top: 2px;
+  }
+
+  .user-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(255,255,255,0.1);
+    border: 1px solid rgba(255,255,255,0.2);
+    color: white;
+    border-radius: 40px;
+    padding: 6px 12px 6px 6px;
+    cursor: pointer;
+    transition: background 0.2s;
+    white-space: nowrap;
+  }
+
+  .user-btn:hover { background: rgba(255,255,255,0.18); }
+
+  .user-avatar {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: var(--gold);
+    color: var(--navy);
+    font-weight: 700;
+    font-size: 11px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .user-name { font-size: 13px; font-weight: 700; }
+  .caret { font-size: 10px; opacity: 0.6; }
+
+  .demo-banner {
+    margin-top: 8px;
+    background: rgba(200,149,58,0.2);
+    border: 1px solid rgba(200,149,58,0.4);
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 12px;
+    color: #f0d090;
+  }
+
+  /* MAIN */
+  main {
+    max-width: 680px;
+    margin: 0 auto;
+    padding: 16px 12px 40px;
+  }
+
+  .legend {
+    display: flex;
+    gap: 14px;
+    margin-bottom: 16px;
+    padding: 10px 14px;
+    background: white;
+    border-radius: 10px;
+    border: 1px solid var(--sand-dark);
+  }
+
+  .leg {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+  }
+
+  .leg.yes { color: var(--yes); }
+  .leg.no { color: var(--no); }
+  .leg.tbd { color: var(--tbd); }
+
+  /* WEEKEND CARDS */
+  .weekends-list { display: flex; flex-direction: column; gap: 14px; }
+
+  .weekend-card {
+    background: white;
+    border-radius: 14px;
+    border: 1.5px solid var(--sand-dark);
+    overflow: hidden;
+    transition: box-shadow 0.2s;
+    animation: fadeUp 0.3s ease both;
+  }
+
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .weekend-card.has-badge { border-color: var(--gold); }
+
+  .weekend-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    background: var(--navy);
+    color: white;
+    gap: 12px;
+  }
+
+  .weekend-date {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .holiday-badge {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--gold);
+  }
+
+  .date-label {
+    font-family: 'Playfair Display', serif;
+    font-size: 18px;
+    font-weight: 700;
+  }
+
+  .room-meter {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4px;
+    min-width: 90px;
+  }
+
+  .room-bar-wrap {
+    width: 80px;
+    height: 5px;
+    background: rgba(255,255,255,0.15);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+
+  .room-bar {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.4s ease;
+  }
+
+  .room-count {
+    font-size: 11px;
+    font-weight: 700;
+  }
+
+  /* COUPLES GRID */
+  .couples-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0;
+    border-bottom: 1px solid var(--sand-dark);
+  }
+
+  @media (min-width: 480px) {
+    .couples-grid { grid-template-columns: repeat(3, 1fr); }
+  }
+
+  .couple-cell {
+    padding: 12px 12px 10px;
+    border-right: 1px solid var(--sand-dark);
+    border-bottom: 1px solid var(--sand-dark);
+    transition: background 0.15s;
+  }
+
+  .couple-cell:nth-child(2n) { border-right: none; }
+  @media (min-width: 480px) {
+    .couple-cell:nth-child(2n) { border-right: 1px solid var(--sand-dark); }
+    .couple-cell:nth-child(3n) { border-right: none; }
+  }
+
+  .couple-cell.is-me {
+    background: linear-gradient(135deg, #f0f8ff 0%, #e8f4f0 100%);
+  }
+
+  .couple-name {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--navy);
+    margin-bottom: 8px;
+    line-height: 1.3;
+  }
+
+  .amp {
+    font-weight: 300;
+    color: var(--muted);
+    font-size: 11px;
+  }
+
+  .status-btns {
+    display: flex;
+    gap: 5px;
+  }
+
+  .status-btn {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    border: 1.5px solid var(--sand-dark);
+    background: var(--sand);
+    color: var(--muted);
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.15s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .status-btn:not(:disabled):hover {
+    border-color: var(--navy-light);
+    transform: scale(1.05);
+  }
+
+  .status-btn:disabled {
+    cursor: default;
+    opacity: 0.65;
+  }
+
+  .status-btn.active.yes {
+    background: var(--yes-bg);
+    border-color: var(--yes);
+    color: var(--yes);
+  }
+
+  .status-btn.active.no {
+    background: var(--no-bg);
+    border-color: var(--no);
+    color: var(--no);
+  }
+
+  .status-btn.active.tbd {
+    background: var(--tbd-bg);
+    border-color: var(--tbd);
+    color: var(--tbd);
+  }
+
+  /* GUESTS */
+  .guests-section {
+    padding: 10px 14px 12px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .guest-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    width: 100%;
+  }
+
+  .guest-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    background: var(--tbd-bg);
+    border: 1px solid #e8c87a;
+    color: var(--tbd);
+    border-radius: 20px;
+    padding: 3px 8px 3px 10px;
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .guest-remove {
+    background: none;
+    border: none;
+    color: var(--tbd);
+    cursor: pointer;
+    font-size: 16px;
+    line-height: 1;
+    padding: 0;
+    opacity: 0.6;
+  }
+
+  .guest-remove:hover { opacity: 1; }
+
+  .add-guest-btn {
+    background: none;
+    border: 1.5px dashed var(--sand-dark);
+    color: var(--muted);
+    border-radius: 20px;
+    padding: 5px 12px;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.15s;
+    font-family: 'Lato', sans-serif;
+  }
+
+  .add-guest-btn:hover {
+    border-color: var(--navy);
+    color: var(--navy);
+  }
+
+  /* MODAL */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(26,46,74,0.5);
+    backdrop-filter: blur(3px);
+    z-index: 200;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+
+  .modal-overlay.open { display: flex; }
+
+  .modal {
+    background: white;
+    border-radius: 18px;
+    padding: 24px;
+    width: 100%;
+    max-width: 360px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.25);
+    animation: popIn 0.2s ease;
+  }
+
+  @keyframes popIn {
+    from { transform: scale(0.95); opacity: 0; }
+    to { transform: scale(1); opacity: 1; }
+  }
+
+  .modal-title {
+    font-family: 'Playfair Display', serif;
+    font-size: 22px;
+    color: var(--navy);
+    margin-bottom: 4px;
+  }
+
+  .modal-wk {
+    font-size: 13px;
+    color: var(--muted);
+    margin-bottom: 16px;
+  }
+
+  .guest-input {
+    width: 100%;
+    border: 1.5px solid var(--sand-dark);
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-size: 15px;
+    font-family: 'Lato', sans-serif;
+    color: var(--text);
+    outline: none;
+    transition: border-color 0.15s;
+    background: var(--cream);
+    margin-bottom: 16px;
+  }
+
+  .guest-input:focus { border-color: var(--navy); }
+
+  .modal-btns { display: flex; gap: 10px; }
+
+  .modal-cancel {
+    flex: 1;
+    padding: 10px;
+    border: 1.5px solid var(--sand-dark);
+    border-radius: 10px;
+    background: none;
+    color: var(--muted);
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    font-family: 'Lato', sans-serif;
+  }
+
+  .modal-confirm {
+    flex: 2;
+    padding: 10px;
+    border: none;
+    border-radius: 10px;
+    background: var(--navy);
+    color: white;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    font-family: 'Lato', sans-serif;
+    transition: background 0.15s;
+  }
+
+  .modal-confirm:hover { background: var(--navy-light); }
+
+  /* USER PICKER */
+  .picker-screen {
+    min-height: 100vh;
+    background: var(--navy);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 30px 20px;
+  }
+
+  .picker-inner {
+    text-align: center;
+    max-width: 420px;
+    width: 100%;
+  }
+
+  .wave-line.large {
+    font-size: 14px;
+    letter-spacing: 4px;
+    margin-bottom: 6px;
+  }
+
+  .picker-title {
+    font-family: 'Playfair Display', serif;
+    font-size: 52px;
+    font-weight: 900;
+    color: white;
+    line-height: 1;
+    margin-bottom: 6px;
+  }
+
+  .picker-sub {
+    font-size: 13px;
+    font-weight: 300;
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    color: var(--sand-dark);
+    margin-bottom: 32px;
+  }
+
+  .picker-prompt {
+    font-size: 14px;
+    font-weight: 300;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.5);
+    margin-bottom: 20px;
+  }
+
+  .picker-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+
+  .picker-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    background: rgba(255,255,255,0.06);
+    border: 1.5px solid rgba(255,255,255,0.12);
+    color: white;
+    border-radius: 14px;
+    padding: 18px 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-family: 'Lato', sans-serif;
+  }
+
+  .picker-btn:hover {
+    background: rgba(255,255,255,0.12);
+    border-color: var(--gold);
+    transform: translateY(-2px);
+  }
+
+  .picker-initials {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: var(--gold);
+    color: var(--navy);
+    font-weight: 900;
+    font-size: 15px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .picker-label {
+    font-size: 13px;
+    font-weight: 700;
+    text-align: center;
+    line-height: 1.3;
+  }
+
+  #app { min-height: 100vh; }
+</style>
+</head>
+<body>
+  <div id="app">
+    <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;color:#7a8599;font-family:'Lato',sans-serif;">
+      Loading...
+    </div>
+  </div>
+</body>
+</html>
