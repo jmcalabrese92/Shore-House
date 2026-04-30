@@ -8,20 +8,9 @@
 <title>Shore House</title>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=Lato:wght@300;400;700&display=swap" rel="stylesheet">
 
-<!-- ============================================================
-     FIREBASE SETUP — FILL IN YOUR CREDENTIALS HERE
-     
-     1. Go to https://console.firebase.google.com
-     2. Create a new project (or use existing)
-     3. Click "Add app" → Web app
-     4. Copy the firebaseConfig object values below
-     5. Go to Build → Realtime Database → Create database
-     6. Set rules to:
-        { "rules": { ".read": true, ".write": true } }
-     ============================================================ -->
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-  import { getDatabase, ref, onValue, set, update } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+  import { getDatabase, ref, onValue, set } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
 
   const firebaseConfig = {
     apiKey: "AIzaSyAUaf53h7A0sDZBV6hk63IBPJSkIjJgP-M",
@@ -34,958 +23,623 @@
     measurementId: "G-MW3ZLBP6EB"
   };
 
-  // ============================================================
-  // APP DATA
-  // ============================================================
-
-  const COUPLES = [
-    { id: "parents",  label: "Mom & Dad",      rooms: 1, locked: true  },
-    { id: "rob",      label: "Rob & Jess",     rooms: 3, locked: false },
-    { id: "erin",     label: "Erin & Mike",    rooms: 2, locked: false },
-    { id: "lauren",   label: "Lauren & Oscar", rooms: 1, locked: false },
-    { id: "justin",   label: "Justin & Alex",  rooms: 1, locked: false },
-    { id: "connor",   label: "Connor & Sophie",rooms: 1, locked: false },
-  ];
-
+  const SHORE_ADDRESS = "1932 Seaman Court, Toms River, NJ";
   const TOTAL_ROOMS = 12;
 
-  // Generate weekends Memorial Day → Labor Day
+  const COUPLES = [
+    { id: "parents",  label: "Mom & Dad",       rooms: 1, locked: true  },
+    { id: "rob",      label: "Rob & Jess",      rooms: 3, locked: false },
+    { id: "erin",     label: "Erin & Mike",     rooms: 2, locked: false },
+    { id: "lauren",   label: "Lauren & Oscar",  rooms: 1, locked: false },
+    { id: "justin",   label: "Justin & Alex",   rooms: 1, locked: false },
+    { id: "connor",   label: "Connor & Sophie", rooms: 1, locked: false },
+  ];
+
   function generateWeekends() {
     const weekends = [];
-    // Memorial Day 2025 = May 23
-    const start = new Date(2025, 4, 23);
-    // Labor Day 2025 = Aug 29 (Fri before)
-    const end = new Date(2025, 8, 5);
-    let d = new Date(start);
-    const dayNames = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
-    const monNames = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-    while (d <= end) {
-      // Find Friday of this weekend
-      let fri = new Date(d);
-      // d is always a Friday start
-      let sun = new Date(fri);
-      sun.setDate(fri.getDate() + 2);
-      const label = `${monNames[fri.getMonth()]} ${fri.getDate()}–${sun.getDate()}`;
-      const isMemorial = weekends.length === 0;
-      const isLabor = fri >= new Date(2025, 8, 5);
-      weekends.push({
-        id: `wk_${fri.toISOString().slice(0,10)}`,
-        label,
-        fri: fri.toISOString().slice(0,10),
-        badge: isMemorial ? "Memorial Day" : isLabor ? "Labor Day" : null,
-      });
-      d.setDate(d.getDate() + 7);
-    }
-    return weekends;
-  }
-
-  // Adjust to start on Fridays
-  function generateWeekendsFixed() {
-    const weekends = [];
     const monNames = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep"];
-    const starts = [];
-    // Memorial Day 2026 = May 25 (Monday), so weekend starts Fri May 22
-    let d = new Date(2026, 4, 22); // May 22, 2026 - Friday
-    // Labor Day 2026 = Sep 7 (Monday), so weekend starts Fri Sep 4
-    const labor = new Date(2026, 8, 4); // Sep 4, 2026 - Friday
+    let d = new Date(2026, 4, 22);
+    const labor = new Date(2026, 8, 4);
+    let i = 0;
     while (d <= labor) {
-      starts.push(new Date(d));
-      d.setDate(d.getDate() + 7);
-    }
-    starts.forEach((fri, i) => {
-      const sun = new Date(fri);
-      sun.setDate(fri.getDate() + 2);
-      const isMemorial = i === 0;
-      const isLabor = i === starts.length - 1;
-      const friStr = `${monNames[fri.getMonth()]} ${fri.getDate()}`;
-      const sunStr = `${sun.getDate()}`;
-      const label = `${friStr}–${sunStr}`;
+      const fri = new Date(d);
+      const sun = new Date(fri); sun.setDate(fri.getDate() + 2);
+      const mon = new Date(fri); mon.setDate(fri.getDate() + 3);
       weekends.push({
         id: `wk_${fri.toISOString().slice(0,10)}`,
-        label,
-        badge: isMemorial ? "Memorial Day" : isLabor ? "Labor Day" : null,
+        label: `${monNames[fri.getMonth()]} ${fri.getDate()}\u2013${sun.getDate()}`,
+        friDate: fri.toISOString().slice(0,10),
+        monDate: mon.toISOString().slice(0,10),
+        badge: i === 0 ? "Memorial Day" : d >= labor ? "Labor Day" : null,
       });
-    });
+      d.setDate(d.getDate() + 7); i++;
+    }
     return weekends;
   }
 
-  const WEEKENDS = generateWeekendsFixed();
+  const WEEKENDS = generateWeekends();
 
-  // ============================================================
-  // STATE
-  // ============================================================
-  let db;
+  let db, isFirebaseConnected = false;
   let currentUser = localStorage.getItem("shoreHouseUser") || null;
-  let appData = {}; // live from Firebase
-  let isFirebaseConnected = false;
+  let appData = {}, invitesData = {};
+  const urlParams = new URLSearchParams(window.location.search);
+  const inviteId = urlParams.get("invite");
 
-  // ============================================================
-  // FIREBASE INIT
-  // ============================================================
   try {
     const app = initializeApp(firebaseConfig);
     db = getDatabase(app);
     isFirebaseConnected = true;
-
-    const dataRef = ref(db, "shoreHouse2026");
-    onValue(dataRef, (snapshot) => {
-      appData = snapshot.val() || {};
-      renderGrid();
-    });
+    onValue(ref(db, "shoreHouse2026"), snap => { appData = snap.val() || {}; if (!inviteId) renderGrid(); });
+    onValue(ref(db, "invites2026"), snap => { invitesData = snap.val() || {}; if (inviteId) renderInvitePage(); else renderGrid(); });
   } catch(e) {
-    console.warn("Firebase not configured yet — running in demo mode", e);
-    isFirebaseConnected = false;
-    renderGrid();
+    console.warn("Firebase not configured", e);
+    if (inviteId) renderInvitePage(); else renderGrid();
   }
 
-  // ============================================================
-  // WRITE HELPERS
-  // ============================================================
-  function setStatus(weekendId, coupleId, status) {
-    if (!isFirebaseConnected) {
-      appData[weekendId] = appData[weekendId] || {};
-      appData[weekendId].statuses = appData[weekendId].statuses || {};
-      appData[weekendId].statuses[coupleId] = status;
-      renderGrid();
-      return;
-    }
-    const r = ref(db, `shoreHouse2026/${weekendId}/statuses/${coupleId}`);
-    set(r, status);
+  function writeData(path, value) { if (isFirebaseConnected) set(ref(db, path), value); }
+
+  function getLabelById(id) { return COUPLES.find(c => c.id === id)?.label || id; }
+  function getInitials(id) { const l = getLabelById(id); const p = l.split(" & "); return (p[0][0] + (p[1]?.[0] || "")).toUpperCase(); }
+  function getWeekendById(id) { return WEEKENDS.find(w => w.id === id); }
+
+  function getStatus(wkId, coupleId) { return ((appData[wkId] || {}).statuses || {})[coupleId] || "tbd"; }
+
+  function getAllGuests(wkId) {
+    const manual = (appData[wkId] || {}).guests || {};
+    const invited = (appData[wkId] || {}).invitedGuests || {};
+    const out = [];
+    Object.entries(manual).forEach(([k,g]) => out.push({key:k, type:"manual", ...g}));
+    Object.entries(invited).forEach(([k,g]) => out.push({key:k, type:"invited", ...g}));
+    return out;
   }
 
-  function addGuest(weekendId, name) {
-    const key = Date.now();
-    if (!isFirebaseConnected) {
-      appData[weekendId] = appData[weekendId] || {};
-      appData[weekendId].guests = appData[weekendId].guests || {};
-      appData[weekendId].guests[key] = { name, addedBy: currentUser };
-      renderGrid();
-      closeModal();
-      return;
-    }
-    const r = ref(db, `shoreHouse2026/${weekendId}/guests/${key}`);
-    set(r, { name, addedBy: currentUser });
-    closeModal();
-  }
-
-  function removeGuest(weekendId, guestKey) {
-    if (!isFirebaseConnected) {
-      delete appData[weekendId].guests[guestKey];
-      renderGrid();
-      return;
-    }
-    const r = ref(db, `shoreHouse2026/${weekendId}/guests/${guestKey}`);
-    set(r, null);
-  }
-
-  // ============================================================
-  // COMPUTED
-  // ============================================================
-  function getRoomsUsed(weekendId) {
-    const statuses = (appData[weekendId] || {}).statuses || {};
-    let rooms = 1; // parents always count
-    COUPLES.filter(c => !c.locked).forEach(c => {
-      if (statuses[c.id] === "yes") rooms += c.rooms;
-    });
+  function getRoomsUsed(wkId) {
+    const statuses = (appData[wkId] || {}).statuses || {};
+    let rooms = 1;
+    COUPLES.filter(c => !c.locked).forEach(c => { if (statuses[c.id] === "yes") rooms += c.rooms; });
+    getAllGuests(wkId).forEach(g => { rooms += (parseInt(g.rooms) || 0); });
     return rooms;
   }
 
-  function getGuests(weekendId) {
-    return (appData[weekendId] || {}).guests || {};
+  function buildCalUrl(wk) {
+    const s = wk.friDate.replace(/-/g,""), e = wk.monDate.replace(/-/g,"");
+    return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent("Shore House Weekend \uD83C\uDF0A")}&dates=${s}/${e}&details=${encodeURIComponent("Join us at the shore house!\n\n" + SHORE_ADDRESS)}&location=${encodeURIComponent(SHORE_ADDRESS)}`;
   }
 
-  function getStatus(weekendId, coupleId) {
-    return ((appData[weekendId] || {}).statuses || {})[coupleId] || "tbd";
-  }
-
-  // ============================================================
-  // RENDER
-  // ============================================================
-  function renderGrid() {
+  // ── INVITE PAGE ──────────────────────────────────────────────
+  function renderInvitePage() {
     const container = document.getElementById("app");
-    if (!container) return;
-
-    if (!currentUser) {
-      renderUserPicker(container);
+    const invite = invitesData[inviteId];
+    if (!invite) {
+      container.innerHTML = `<div class="invite-screen"><div class="invite-box"><div class="wave-line large">&#12316;&#12316;&#12316;&#12316;&#12316;</div><h1 class="picker-title">Shore House</h1><p class="invite-from" style="opacity:0.5;margin-top:20px;">This invite link is invalid or has expired.</p></div></div>`;
       return;
     }
+    if (invite.accepted) {
+      const wk = getWeekendById(invite.acceptedWeekend);
+      container.innerHTML = `<div class="invite-screen"><div class="invite-box"><div class="wave-line large">&#12316;&#12316;&#12316;&#12316;&#12316;</div><h1 class="picker-title">Shore House</h1><p class="invite-from">You're all set! &#127881;</p><p class="invite-address">Already accepted for <strong>${wk?.label || "a weekend"}</strong></p>${wk ? `<a href="${buildCalUrl(wk)}" target="_blank" class="cal-btn">&#128197; Add to Google Calendar</a>` : ''}</div></div>`;
+      return;
+    }
+    const offered = (invite.weekendIds || []).map(id => getWeekendById(id)).filter(Boolean);
+    container.innerHTML = `
+      <div class="invite-screen"><div class="invite-box">
+        <div class="wave-line large">&#12316;&#12316;&#12316;&#12316;&#12316;</div>
+        <h1 class="picker-title">Shore House</h1>
+        <p class="invite-sub">Summer 2026</p>
+        <p class="invite-from"><strong>${getLabelById(invite.invitedBy)}</strong> is inviting you down to the shore!</p>
+        <p class="invite-address">&#128205; ${SHORE_ADDRESS}</p>
+        <p class="invite-pick-label">Pick a weekend</p>
+        <div class="invite-weekends" id="invite-weekends">
+          ${offered.map(wk => `
+            <button class="invite-wk-btn" data-wkid="${wk.id}" onclick="selectInviteWeekend('${wk.id}')">
+              ${wk.badge ? `<span class="invite-badge">${wk.badge}</span>` : ''}
+              <span class="invite-wk-label">${wk.label}</span>
+            </button>`).join('')}
+        </div>
+        <div id="invite-confirm-area"></div>
+      </div></div>`;
+  }
 
+  window.selectInviteWeekend = function(wkId) {
+    document.querySelectorAll('.invite-wk-btn').forEach(b => b.classList.remove('selected'));
+    document.querySelector(`.invite-wk-btn[data-wkid="${wkId}"]`)?.classList.add('selected');
+    const wk = getWeekendById(wkId);
+    const invite = invitesData[inviteId];
+    document.getElementById('invite-confirm-area').innerHTML = `
+      <div class="invite-confirm">
+        <p class="invite-confirm-text">Weekend of <strong>${wk.label}</strong> with <strong>${getLabelById(invite?.invitedBy)}</strong></p>
+        <button class="invite-accept-btn" onclick="confirmInviteAccept('${wkId}')">&#10003; Accept &amp; Confirm</button>
+      </div>`;
+  };
+
+  window.confirmInviteAccept = function(wkId) {
+    const invite = invitesData[inviteId];
+    if (!invite) return;
+    writeData(`invites2026/${inviteId}/accepted`, true);
+    writeData(`invites2026/${inviteId}/acceptedWeekend`, wkId);
+    const guestKey = `i_${inviteId}`;
+    writeData(`shoreHouse2026/${wkId}/invitedGuests/${guestKey}`, {
+      names: invite.guestNames, rooms: invite.rooms, addedBy: invite.invitedBy, inviteKey: inviteId, type: "invited"
+    });
+    const wk = getWeekendById(wkId);
+    document.getElementById('invite-confirm-area').innerHTML = `
+      <div class="invite-accepted">
+        <p class="accepted-msg">&#127881; You're confirmed for <strong>${wk.label}</strong>!</p>
+        <a href="${buildCalUrl(wk)}" target="_blank" class="cal-btn">&#128197; Add to Google Calendar</a>
+        <p class="cal-note">Opens Google Calendar with the event pre-filled</p>
+      </div>`;
+    document.querySelectorAll('.invite-wk-btn').forEach(b => { b.disabled = true; b.style.opacity = '0.4'; });
+  };
+
+  // ── MAIN GRID ────────────────────────────────────────────────
+  function renderGrid() {
+    const container = document.getElementById("app");
+    if (!container || inviteId) return;
+    if (!currentUser) { renderUserPicker(container); return; }
     const activeCouples = COUPLES.filter(c => !c.locked);
 
     let html = `
-      <header>
-        <div class="header-inner">
-          <div class="header-top">
-            <div class="title-block">
-              <div class="wave-line">〰〰〰</div>
-              <h1>Shore House</h1>
-              <div class="subtitle">Summer 2026</div>
-            </div>
-            <button class="user-btn" onclick="switchUser()">
-              <span class="user-avatar">${getInitials(currentUser)}</span>
-              <span class="user-name">${getLabelById(currentUser)}</span>
-              <span class="caret">▾</span>
-            </button>
-          </div>
-          ${!isFirebaseConnected ? `<div class="demo-banner">⚠️ Demo Mode — add Firebase credentials to sync across devices</div>` : ''}
+      <header><div class="header-inner"><div class="header-top">
+        <div class="title-block">
+          <div class="wave-line">&#12316;&#12316;&#12316;</div>
+          <h1>Shore House</h1>
+          <div class="subtitle">Summer 2026</div>
         </div>
-      </header>
-
+        <button class="user-btn" onclick="switchUser()">
+          <span class="user-avatar">${getInitials(currentUser)}</span>
+          <span class="user-name">${getLabelById(currentUser)}</span>
+          <span class="caret">&#9662;</span>
+        </button>
+      </div>
+      ${!isFirebaseConnected ? `<div class="demo-banner">&#9888;&#65039; Demo Mode &mdash; Firebase not connected</div>` : ''}
+      </div></header>
       <main>
         <div class="legend">
-          <span class="leg yes">✓ Coming</span>
-          <span class="leg no">✗ Not Coming</span>
+          <span class="leg yes">&#10003; Coming</span>
+          <span class="leg no">&#10007; Not Coming</span>
           <span class="leg tbd">? TBD</span>
         </div>
-
-        <div class="weekends-list">
-    `;
+        <div class="weekends-list">`;
 
     WEEKENDS.forEach(wk => {
       const roomsUsed = getRoomsUsed(wk.id);
       const roomPct = Math.min(roomsUsed / TOTAL_ROOMS, 1);
       const roomColor = roomsUsed >= TOTAL_ROOMS ? '#e05a5a' : roomsUsed >= 10 ? '#e8a44b' : '#4a9b78';
-      const guests = getGuests(wk.id);
-      const guestList = Object.entries(guests);
+      const guests = getAllGuests(wk.id);
 
       html += `
-        <div class="weekend-card ${wk.badge ? 'has-badge' : ''}">
+        <div class="weekend-card${wk.badge ? ' has-badge' : ''}">
           <div class="weekend-header">
             <div class="weekend-date">
               ${wk.badge ? `<span class="holiday-badge">${wk.badge}</span>` : ''}
               <span class="date-label">${wk.label}</span>
             </div>
             <div class="room-meter">
-              <div class="room-bar-wrap">
-                <div class="room-bar" style="width:${roomPct*100}%; background:${roomColor}"></div>
-              </div>
+              <div class="room-bar-wrap"><div class="room-bar" style="width:${roomPct*100}%;background:${roomColor}"></div></div>
               <span class="room-count" style="color:${roomColor}">${roomsUsed}/${TOTAL_ROOMS} rooms</span>
             </div>
           </div>
+          <div class="couples-grid">`;
 
-          <div class="couples-grid">
-      `;
-
-      activeCouples.forEach(couple => {
-        const status = getStatus(wk.id, couple.id);
-        const isMe = couple.id === currentUser;
+      activeCouples.forEach(c => {
+        const status = getStatus(wk.id, c.id);
+        const isMe = c.id === currentUser;
+        const [first, second] = c.label.split(" & ");
         html += `
-          <div class="couple-cell ${isMe ? 'is-me' : ''}">
-            <div class="couple-name">${couple.label.split(' & ')[0]}<br><span class="amp">&</span> ${couple.label.split(' & ')[1]}</div>
+          <div class="couple-cell${isMe ? ' is-me' : ''}">
+            <div class="couple-name">${first}<br><span class="amp">&amp;</span> ${second}</div>
             <div class="status-btns">
-              <button class="status-btn ${status === 'yes' ? 'active yes' : ''}" 
-                onclick="setStatusUI('${wk.id}','${couple.id}','yes')" 
-                ${!isMe ? 'disabled' : ''} title="Coming">✓</button>
-              <button class="status-btn ${status === 'no' ? 'active no' : ''}" 
-                onclick="setStatusUI('${wk.id}','${couple.id}','no')" 
-                ${!isMe ? 'disabled' : ''} title="Not Coming">✗</button>
-              <button class="status-btn ${status === 'tbd' ? 'active tbd' : ''}" 
-                onclick="setStatusUI('${wk.id}','${couple.id}','tbd')" 
-                ${!isMe ? 'disabled' : ''} title="TBD">?</button>
+              <button class="status-btn${status==='yes'?' active yes':''}" onclick="setStatusUI('${wk.id}','${c.id}','yes')" ${!isMe?'disabled':''}>&#10003;</button>
+              <button class="status-btn${status==='no'?' active no':''}" onclick="setStatusUI('${wk.id}','${c.id}','no')" ${!isMe?'disabled':''}>&#10007;</button>
+              <button class="status-btn${status==='tbd'?' active tbd':''}" onclick="setStatusUI('${wk.id}','${c.id}','tbd')" ${!isMe?'disabled':''}>?</button>
             </div>
-          </div>
-        `;
+          </div>`;
       });
 
-      html += `</div>`; // end couples-grid
+      html += `</div><div class="guests-section">`;
 
-      // Guests section
-      html += `<div class="guests-section">`;
-      if (guestList.length > 0) {
-        html += `<div class="guest-chips">`;
-        guestList.forEach(([key, g]) => {
-          html += `<span class="guest-chip">${g.name} <button class="guest-remove" onclick="removeGuestUI('${wk.id}','${key}')">×</button></span>`;
+      if (guests.length > 0) {
+        html += `<div class="guest-header-label">Guests</div><div class="guest-chips">`;
+        guests.forEach(g => {
+          const names = Array.isArray(g.names) ? g.names.join(", ") : (g.names || g.name || "Guest");
+          const ownerLabel = getLabelById(g.addedBy);
+          const rooms = parseInt(g.rooms) || 0;
+          html += `
+            <div class="guest-chip${g.type==='invited'?' invited':' manual'}" ondblclick="editGuestUI('${wk.id}','${g.key}','${g.type}')" title="Double-tap to edit">
+              <div class="guest-chip-main">
+                <span class="guest-names">${names}</span>
+                <span class="guest-meta">${ownerLabel}'s guest &middot; ${rooms} room${rooms!==1?'s':''} <span class="edit-hint">✎</span></span>
+              </div>
+              <button class="guest-remove" onclick="removeGuestUI('${wk.id}','${g.key}','${g.type}')">&#215;</button>
+            </div>`;
         });
         html += `</div>`;
       }
-      html += `<button class="add-guest-btn" onclick="openGuestModal('${wk.id}','${wk.label}')">+ Add Guest</button>`;
-      html += `</div>`;
 
-      html += `</div>`; // end weekend-card
+      html += `
+        <div class="guest-actions">
+          <button class="add-guest-btn" onclick="openManualGuestModal('${wk.id}','${wk.label}')">+ Add Guest</button>
+          <button class="invite-btn" onclick="openInviteModal('${wk.id}')">&#9993; Invite</button>
+        </div>
+      </div></div>`;
     });
 
-    html += `</div></main>`;
-
-    // Modal
-    html += `
-      <div id="modal-overlay" class="modal-overlay" onclick="closeModal()">
-        <div class="modal" onclick="event.stopPropagation()">
-          <div id="modal-content"></div>
-        </div>
-      </div>
-    `;
+    html += `</div></main>
+      <div id="modal-overlay" class="modal-overlay">
+        <div class="modal" onclick="event.stopPropagation()"><div id="modal-content"></div></div>
+      </div>`;
 
     container.innerHTML = html;
   }
 
   function renderUserPicker(container) {
-    const activeCouples = COUPLES.filter(c => !c.locked);
     container.innerHTML = `
-      <div class="picker-screen">
-        <div class="picker-inner">
-          <div class="wave-line large">〰〰〰〰〰</div>
-          <h1 class="picker-title">Shore House</h1>
-          <p class="picker-sub">Summer 2026</p>
-          <p class="picker-prompt">Who are you?</p>
-          <div class="picker-grid">
-            ${activeCouples.map(c => `
-              <button class="picker-btn" onclick="selectUser('${c.id}')">
-                <span class="picker-initials">${getInitials(c.id)}</span>
-                <span class="picker-label">${c.label}</span>
-              </button>
-            `).join('')}
-          </div>
+      <div class="picker-screen"><div class="picker-inner">
+        <div class="wave-line large">&#12316;&#12316;&#12316;&#12316;&#12316;</div>
+        <h1 class="picker-title">Shore House</h1>
+        <p class="picker-sub">Summer 2026</p>
+        <p class="picker-prompt">Who are you?</p>
+        <div class="picker-grid">
+          ${COUPLES.filter(c=>!c.locked).map(c=>`
+            <button class="picker-btn" onclick="selectUser('${c.id}')">
+              <span class="picker-initials">${getInitials(c.id)}</span>
+              <span class="picker-label">${c.label}</span>
+            </button>`).join('')}
         </div>
-      </div>
-    `;
+      </div></div>`;
   }
 
-  // ============================================================
-  // UI HANDLERS (exposed globally)
-  // ============================================================
-  window.setStatusUI = function(weekendId, coupleId, status) {
-    setStatus(weekendId, coupleId, status);
-  };
-
-  window.openGuestModal = function(weekendId, label) {
+  // ── MODALS ───────────────────────────────────────────────────
+  window.openManualGuestModal = function(wkId, label) {
     document.getElementById('modal-overlay').classList.add('open');
     document.getElementById('modal-content').innerHTML = `
       <h3 class="modal-title">Add Guest</h3>
       <p class="modal-wk">${label}</p>
-      <input id="guest-input" class="guest-input" type="text" placeholder="Guest name..." autofocus>
-      <div class="modal-btns">
-        <button class="modal-cancel" onclick="closeModal()">Cancel</button>
-        <button class="modal-confirm" onclick="submitGuest('${weekendId}')">Add</button>
+      <label class="field-label">Guest name(s) <span class="field-hint">one per line</span></label>
+      <textarea id="g-names" class="guest-textarea" rows="3" placeholder="John Smith&#10;Jane Smith&#10;Emma Smith"></textarea>
+      <label class="field-label">Rooms needed</label>
+      <div class="rooms-stepper">
+        <button class="stepper-btn" onclick="stepCount('g-rooms',-1)">&#8722;</button>
+        <span id="g-rooms">1</span>
+        <button class="stepper-btn" onclick="stepCount('g-rooms',1)">+</button>
       </div>
-    `;
-    setTimeout(() => document.getElementById('guest-input')?.focus(), 100);
+      <label class="field-label">Hosted by</label>
+      <select id="g-host" class="field-select">
+        ${COUPLES.filter(c=>!c.locked).map(c=>`<option value="${c.id}"${c.id===currentUser?' selected':''}>${c.label}</option>`).join('')}
+      </select>
+      <div class="modal-btns" style="margin-top:18px;">
+        <button class="modal-cancel" onclick="closeModal()">Cancel</button>
+        <button class="modal-confirm" onclick="submitManualGuest('${wkId}')">Add Guest</button>
+      </div>`;
   };
 
-  window.submitGuest = function(weekendId) {
-    const val = document.getElementById('guest-input')?.value.trim();
-    if (val) addGuest(weekendId, val);
+  window.submitManualGuest = function(wkId) {
+    const names = (document.getElementById('g-names')?.value||'').split('\n').map(n=>n.trim()).filter(Boolean);
+    const rooms = parseInt(document.getElementById('g-rooms')?.textContent)||1;
+    const addedBy = document.getElementById('g-host')?.value || currentUser;
+    if (!names.length) return;
+    const key = `m_${Date.now()}`;
+    const payload = { names, rooms, addedBy, type:"manual" };
+    if (!isFirebaseConnected) { appData[wkId]=appData[wkId]||{}; appData[wkId].guests=appData[wkId].guests||{}; appData[wkId].guests[key]=payload; renderGrid(); }
+    else writeData(`shoreHouse2026/${wkId}/guests/${key}`, payload);
+    closeModal();
   };
 
-  window.closeModal = function() {
-    document.getElementById('modal-overlay')?.classList.remove('open');
+  window.editGuestUI = function(wkId, guestKey, guestType) {
+    // Find the guest data
+    const guestData = guestType === 'invited'
+      ? ((appData[wkId] || {}).invitedGuests || {})[guestKey]
+      : ((appData[wkId] || {}).guests || {})[guestKey];
+    if (!guestData) return;
+
+    const names = Array.isArray(guestData.names) ? guestData.names.join('\n') : (guestData.names || guestData.name || '');
+    const rooms = parseInt(guestData.rooms) || 1;
+    const addedBy = guestData.addedBy || currentUser;
+
+    document.getElementById('modal-overlay').classList.add('open');
+    document.getElementById('modal-content').innerHTML = `
+      <h3 class="modal-title">Edit Guest</h3>
+      <p class="modal-wk">${guestType === 'invited' ? 'Invited guest' : 'Manual guest'}</p>
+      <label class="field-label">Guest name(s) <span class="field-hint">one per line</span></label>
+      <textarea id="eg-names" class="guest-textarea" rows="3">${names}</textarea>
+      <label class="field-label">Rooms needed</label>
+      <div class="rooms-stepper">
+        <button class="stepper-btn" onclick="stepCount('eg-rooms',-1)">&#8722;</button>
+        <span id="eg-rooms">${rooms}</span>
+        <button class="stepper-btn" onclick="stepCount('eg-rooms',1)">+</button>
+      </div>
+      <label class="field-label">Hosted by</label>
+      <select id="eg-host" class="field-select">
+        ${COUPLES.filter(c=>!c.locked).map(c=>`<option value="${c.id}"${c.id===addedBy?' selected':''}>${c.label}</option>`).join('')}
+      </select>
+      <div class="modal-btns" style="margin-top:18px;">
+        <button class="modal-cancel" onclick="closeModal()">Cancel</button>
+        <button class="modal-confirm" onclick="saveGuestEdit('${wkId}','${guestKey}','${guestType}')">Save Changes</button>
+      </div>`;
   };
 
-  window.removeGuestUI = function(weekendId, key) {
-    removeGuest(weekendId, key);
-  };
-
-  window.selectUser = function(id) {
-    currentUser = id;
-    localStorage.setItem("shoreHouseUser", id);
-    renderGrid();
-  };
-
-  window.switchUser = function() {
-    currentUser = null;
-    localStorage.removeItem("shoreHouseUser");
-    renderGrid();
-  };
-
-  // Handle Enter key in guest modal
-  document.addEventListener('keydown', e => {
-    if (e.key === 'Enter') {
-      const input = document.getElementById('guest-input');
-      if (input && document.activeElement === input) {
-        const wkId = input.dataset.wkid;
-        // find from onclick
-        document.querySelector('.modal-confirm')?.click();
-      }
+  window.saveGuestEdit = function(wkId, guestKey, guestType) {
+    const names = (document.getElementById('eg-names')?.value||'').split('\n').map(n=>n.trim()).filter(Boolean);
+    const rooms = parseInt(document.getElementById('eg-rooms')?.textContent)||1;
+    const addedBy = document.getElementById('eg-host')?.value || currentUser;
+    if (!names.length) return;
+    const path = guestType === 'invited'
+      ? `shoreHouse2026/${wkId}/invitedGuests/${guestKey}`
+      : `shoreHouse2026/${wkId}/guests/${guestKey}`;
+    const payload = { names, rooms, addedBy, type: guestType };
+    if (guestType === 'invited') payload.inviteKey = guestKey.replace('i_','');
+    if (!isFirebaseConnected) {
+      const store = guestType === 'invited' ? (appData[wkId].invitedGuests||{}) : (appData[wkId].guests||{});
+      store[guestKey] = payload;
+      renderGrid();
+    } else {
+      writeData(path, payload);
     }
-    if (e.key === 'Escape') closeModal();
+    closeModal();
+  };
+
+  let inviteWkIds = new Set();
+
+  window.openInviteModal = function(defaultWkId) {
+    inviteWkIds = new Set([defaultWkId]);
+    document.getElementById('modal-overlay').classList.add('open');
+    document.getElementById('modal-content').innerHTML = `
+      <h3 class="modal-title">Invite Guests</h3>
+      <p class="modal-wk">Create a shareable invite link</p>
+      <label class="field-label">Guest name(s) <span class="field-hint">one per line</span></label>
+      <textarea id="i-names" class="guest-textarea" rows="3" placeholder="John Smith&#10;Jane Smith"></textarea>
+      <label class="field-label">Rooms needed</label>
+      <div class="rooms-stepper">
+        <button class="stepper-btn" onclick="stepCount('i-rooms',-1)">&#8722;</button>
+        <span id="i-rooms">1</span>
+        <button class="stepper-btn" onclick="stepCount('i-rooms',1)">+</button>
+      </div>
+      <label class="field-label">Offer these weekends <span class="field-hint">guest picks one</span></label>
+      <div class="wk-checkbox-list">
+        ${WEEKENDS.map(wk=>`
+          <label class="wk-check-row${wk.id===defaultWkId?' checked':''}" id="wkrow_${wk.id}">
+            <input type="checkbox" class="wk-checkbox" value="${wk.id}" ${wk.id===defaultWkId?'checked':''}
+              onchange="toggleInviteWk('${wk.id}',this.checked)">
+            <span class="wk-check-text">${wk.badge?`<em>${wk.badge}</em> &middot; `:''}${wk.label}</span>
+          </label>`).join('')}
+      </div>
+      <div class="modal-btns" style="margin-top:18px;">
+        <button class="modal-cancel" onclick="closeModal()">Cancel</button>
+        <button class="modal-confirm" onclick="generateInviteLink()">Generate Link</button>
+      </div>
+      <div id="invite-link-result"></div>`;
+  };
+
+  window.toggleInviteWk = function(wkId, checked) {
+    checked ? inviteWkIds.add(wkId) : inviteWkIds.delete(wkId);
+    document.getElementById(`wkrow_${wkId}`)?.classList.toggle('checked', checked);
+  };
+
+  window.generateInviteLink = function() {
+    const guestNames = (document.getElementById('i-names')?.value||'').split('\n').map(n=>n.trim()).filter(Boolean);
+    const rooms = parseInt(document.getElementById('i-rooms')?.textContent)||1;
+    const weekendIds = [...inviteWkIds];
+    const resultEl = document.getElementById('invite-link-result');
+    if (!guestNames.length) {
+      resultEl.innerHTML = `<p class="inline-error">Please enter at least one guest name.</p>`;
+      return;
+    }
+    if (!weekendIds.length) {
+      resultEl.innerHTML = `<p class="inline-error">Please select at least one weekend.</p>`;
+      return;
+    }
+    const payload = { invitedBy: currentUser, guestNames, rooms, weekendIds, createdAt: Date.now(), accepted: false };
+    const key = `inv_${Date.now()}_${Math.random().toString(36).slice(2,7)}`;
+    if (isFirebaseConnected) writeData(`invites2026/${key}`, payload);
+    const link = `${window.location.origin}${window.location.pathname}?invite=${key}`;
+    // Auto-copy immediately
+    try { navigator.clipboard.writeText(link); } catch(e) { const t=document.createElement('textarea');t.value=link;document.body.appendChild(t);t.select();document.execCommand('copy');document.body.removeChild(t); }
+    resultEl.innerHTML = `
+      <div class="invite-result">
+        <p class="invite-result-label">&#128204; Link copied to clipboard!</p>
+        <div class="invite-link-box">
+          <span class="invite-link-text">${link}</span>
+          <button class="copy-btn" onclick="copyLink('${link}')">Copy Again</button>
+        </div>
+        <p class="invite-result-hint">Guest picks a weekend and confirms &mdash; it shows up in the app automatically.</p>
+      </div>`;
+  };
+
+  window.copyLink = function(link) {
+    navigator.clipboard?.writeText(link).catch(()=>{}).finally(()=>{});
+    try { navigator.clipboard.writeText(link); } catch(e) { const t=document.createElement('textarea'); t.value=link; document.body.appendChild(t); t.select(); document.execCommand('copy'); document.body.removeChild(t); }
+    const btn = document.querySelector('.copy-btn');
+    if (btn) { btn.textContent = "Copied!"; setTimeout(()=>btn.textContent="Copy", 2000); }
+  };
+
+  window.stepCount = function(elId, delta) {
+    const el = document.getElementById(elId);
+    if (el) el.textContent = Math.max(1, Math.min(6, (parseInt(el.textContent)||1) + delta));
+  };
+
+  window.setStatusUI = (wkId, coupleId, status) => {
+    if (!isFirebaseConnected) { appData[wkId]=appData[wkId]||{}; appData[wkId].statuses=appData[wkId].statuses||{}; appData[wkId].statuses[coupleId]=status; renderGrid(); return; }
+    writeData(`shoreHouse2026/${wkId}/statuses/${coupleId}`, status);
+  };
+
+  window.removeGuestUI = (wkId, key, type) => {
+    const path = type==='invited' ? `shoreHouse2026/${wkId}/invitedGuests/${key}` : `shoreHouse2026/${wkId}/guests/${key}`;
+    if (!isFirebaseConnected) { if(type==='invited') delete (appData[wkId]?.invitedGuests||{})[key]; else delete (appData[wkId]?.guests||{})[key]; renderGrid(); return; }
+    writeData(path, null);
+  };
+
+  window.closeModal = () => document.getElementById('modal-overlay')?.classList.remove('open');
+  window.selectUser = id => { currentUser = id; localStorage.setItem("shoreHouseUser", id); renderGrid(); };
+  window.switchUser = () => { currentUser = null; localStorage.removeItem("shoreHouseUser"); renderGrid(); };
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') window.closeModal(); });
+  document.addEventListener('click', e => {
+    const overlay = document.getElementById('modal-overlay');
+    if (overlay && overlay.classList.contains('open') && e.target === overlay) window.closeModal();
   });
 
-  // ============================================================
-  // HELPERS
-  // ============================================================
-  function getLabelById(id) {
-    return COUPLES.find(c => c.id === id)?.label || id;
-  }
-
-  function getInitials(id) {
-    const label = getLabelById(id);
-    const parts = label.split(' & ');
-    return (parts[0][0] + (parts[1]?.[0] || '')).toUpperCase();
-  }
-
-  // Initial render
-  renderGrid();
+  if (!isFirebaseConnected) { if (inviteId) renderInvitePage(); else renderGrid(); }
 </script>
 
 <style>
   :root {
-    --navy: #1a2e4a;
-    --navy-light: #243d60;
-    --sand: #f5ede0;
-    --sand-dark: #e8d9c4;
-    --cream: #faf6f0;
-    --coral: #d95f3b;
-    --teal: #3a8a7a;
-    --gold: #c8953a;
-    --yes: #3a8a7a;
-    --yes-bg: #d4ede8;
-    --no: #c44a3a;
-    --no-bg: #f0d8d5;
-    --tbd: #b8882a;
-    --tbd-bg: #f0e4c8;
-    --text: #2a3040;
-    --muted: #7a8599;
+    --navy:#1a2e4a; --navy-light:#243d60; --sand:#f5ede0; --sand-dark:#e8d9c4;
+    --cream:#faf6f0; --gold:#c8953a; --teal:#3a8a7a;
+    --yes:#3a8a7a; --yes-bg:#d4ede8; --no:#c44a3a; --no-bg:#f0d8d5;
+    --tbd:#b8882a; --tbd-bg:#f0e4c8; --text:#2a3040; --muted:#7a8599;
   }
-
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-
-  body {
-    font-family: 'Lato', sans-serif;
-    background: var(--cream);
-    color: var(--text);
-    min-height: 100vh;
-    background-image: 
-      url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23c8953a' fill-opacity='0.04'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
-  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:'Lato',sans-serif;background:var(--cream);color:var(--text);min-height:100vh;
+    background-image:url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23c8953a' fill-opacity='0.04'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");}
 
   /* HEADER */
-  header {
-    background: var(--navy);
-    color: white;
-    position: sticky;
-    top: 0;
-    z-index: 100;
-    box-shadow: 0 4px 20px rgba(26,46,74,0.3);
-  }
-
-  .header-inner {
-    max-width: 680px;
-    margin: 0 auto;
-    padding: 14px 16px 12px;
-  }
-
-  .header-top {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-  }
-
-  .wave-line {
-    color: var(--gold);
-    font-size: 10px;
-    letter-spacing: 2px;
-    margin-bottom: 2px;
-    opacity: 0.7;
-  }
-
-  h1 {
-    font-family: 'Playfair Display', serif;
-    font-size: 26px;
-    font-weight: 900;
-    letter-spacing: -0.5px;
-    line-height: 1;
-  }
-
-  .subtitle {
-    font-size: 11px;
-    font-weight: 300;
-    letter-spacing: 3px;
-    text-transform: uppercase;
-    color: var(--sand-dark);
-    margin-top: 2px;
-  }
-
-  .user-btn {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    background: rgba(255,255,255,0.1);
-    border: 1px solid rgba(255,255,255,0.2);
-    color: white;
-    border-radius: 40px;
-    padding: 6px 12px 6px 6px;
-    cursor: pointer;
-    transition: background 0.2s;
-    white-space: nowrap;
-  }
-
-  .user-btn:hover { background: rgba(255,255,255,0.18); }
-
-  .user-avatar {
-    width: 28px;
-    height: 28px;
-    border-radius: 50%;
-    background: var(--gold);
-    color: var(--navy);
-    font-weight: 700;
-    font-size: 11px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  .user-name { font-size: 13px; font-weight: 700; }
-  .caret { font-size: 10px; opacity: 0.6; }
-
-  .demo-banner {
-    margin-top: 8px;
-    background: rgba(200,149,58,0.2);
-    border: 1px solid rgba(200,149,58,0.4);
-    border-radius: 6px;
-    padding: 6px 10px;
-    font-size: 12px;
-    color: #f0d090;
-  }
+  header{background:var(--navy);color:white;position:sticky;top:0;z-index:100;box-shadow:0 4px 20px rgba(26,46,74,.3);}
+  .header-inner{max-width:680px;margin:0 auto;padding:14px 16px 12px;}
+  .header-top{display:flex;align-items:center;justify-content:space-between;gap:12px;}
+  .wave-line{color:var(--gold);font-size:10px;letter-spacing:2px;margin-bottom:2px;opacity:.7;}
+  h1{font-family:'Playfair Display',serif;font-size:26px;font-weight:900;letter-spacing:-.5px;line-height:1;}
+  .subtitle{font-size:11px;font-weight:300;letter-spacing:3px;text-transform:uppercase;color:var(--sand-dark);margin-top:2px;}
+  .user-btn{display:flex;align-items:center;gap:8px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);color:white;border-radius:40px;padding:6px 12px 6px 6px;cursor:pointer;transition:background .2s;white-space:nowrap;}
+  .user-btn:hover{background:rgba(255,255,255,.18);}
+  .user-avatar{width:28px;height:28px;border-radius:50%;background:var(--gold);color:var(--navy);font-weight:700;font-size:11px;display:flex;align-items:center;justify-content:center;}
+  .user-name{font-size:13px;font-weight:700;}
+  .caret{font-size:10px;opacity:.6;}
+  .demo-banner{margin-top:8px;background:rgba(200,149,58,.2);border:1px solid rgba(200,149,58,.4);border-radius:6px;padding:6px 10px;font-size:12px;color:#f0d090;}
 
   /* MAIN */
-  main {
-    max-width: 680px;
-    margin: 0 auto;
-    padding: 16px 12px 40px;
-  }
-
-  .legend {
-    display: flex;
-    gap: 14px;
-    margin-bottom: 16px;
-    padding: 10px 14px;
-    background: white;
-    border-radius: 10px;
-    border: 1px solid var(--sand-dark);
-  }
-
-  .leg {
-    font-size: 12px;
-    font-weight: 700;
-    letter-spacing: 0.3px;
-  }
-
-  .leg.yes { color: var(--yes); }
-  .leg.no { color: var(--no); }
-  .leg.tbd { color: var(--tbd); }
+  main{max-width:680px;margin:0 auto;padding:16px 12px 40px;}
+  .legend{display:flex;gap:14px;margin-bottom:16px;padding:10px 14px;background:white;border-radius:10px;border:1px solid var(--sand-dark);}
+  .leg{font-size:12px;font-weight:700;}
+  .leg.yes{color:var(--yes);} .leg.no{color:var(--no);} .leg.tbd{color:var(--tbd);}
 
   /* WEEKEND CARDS */
-  .weekends-list { display: flex; flex-direction: column; gap: 14px; }
+  .weekends-list{display:flex;flex-direction:column;gap:14px;}
+  .weekend-card{background:white;border-radius:14px;border:1.5px solid var(--sand-dark);overflow:hidden;animation:fadeUp .3s ease both;}
+  @keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+  .weekend-card.has-badge{border-color:var(--gold);}
+  .weekend-header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:var(--navy);color:white;gap:12px;}
+  .weekend-date{display:flex;flex-direction:column;gap:2px;}
+  .holiday-badge{font-size:10px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--gold);}
+  .date-label{font-family:'Playfair Display',serif;font-size:18px;font-weight:700;}
+  .room-meter{display:flex;flex-direction:column;align-items:flex-end;gap:4px;min-width:90px;}
+  .room-bar-wrap{width:80px;height:5px;background:rgba(255,255,255,.15);border-radius:3px;overflow:hidden;}
+  .room-bar{height:100%;border-radius:3px;transition:width .4s ease;}
+  .room-count{font-size:11px;font-weight:700;}
 
-  .weekend-card {
-    background: white;
-    border-radius: 14px;
-    border: 1.5px solid var(--sand-dark);
-    overflow: hidden;
-    transition: box-shadow 0.2s;
-    animation: fadeUp 0.3s ease both;
-  }
-
-  @keyframes fadeUp {
-    from { opacity: 0; transform: translateY(10px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-
-  .weekend-card.has-badge { border-color: var(--gold); }
-
-  .weekend-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 12px 16px;
-    background: var(--navy);
-    color: white;
-    gap: 12px;
-  }
-
-  .weekend-date {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-
-  .holiday-badge {
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 1.5px;
-    text-transform: uppercase;
-    color: var(--gold);
-  }
-
-  .date-label {
-    font-family: 'Playfair Display', serif;
-    font-size: 18px;
-    font-weight: 700;
-  }
-
-  .room-meter {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 4px;
-    min-width: 90px;
-  }
-
-  .room-bar-wrap {
-    width: 80px;
-    height: 5px;
-    background: rgba(255,255,255,0.15);
-    border-radius: 3px;
-    overflow: hidden;
-  }
-
-  .room-bar {
-    height: 100%;
-    border-radius: 3px;
-    transition: width 0.4s ease;
-  }
-
-  .room-count {
-    font-size: 11px;
-    font-weight: 700;
-  }
-
-  /* COUPLES GRID */
-  .couples-grid {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 0;
-    border-bottom: 1px solid var(--sand-dark);
-  }
-
-  @media (min-width: 480px) {
-    .couples-grid { grid-template-columns: repeat(3, 1fr); }
-  }
-
-  .couple-cell {
-    padding: 12px 12px 10px;
-    border-right: 1px solid var(--sand-dark);
-    border-bottom: 1px solid var(--sand-dark);
-    transition: background 0.15s;
-  }
-
-  .couple-cell:nth-child(2n) { border-right: none; }
-  @media (min-width: 480px) {
-    .couple-cell:nth-child(2n) { border-right: 1px solid var(--sand-dark); }
-    .couple-cell:nth-child(3n) { border-right: none; }
-  }
-
-  .couple-cell.is-me {
-    background: linear-gradient(135deg, #f0f8ff 0%, #e8f4f0 100%);
-  }
-
-  .couple-name {
-    font-size: 12px;
-    font-weight: 700;
-    color: var(--navy);
-    margin-bottom: 8px;
-    line-height: 1.3;
-  }
-
-  .amp {
-    font-weight: 300;
-    color: var(--muted);
-    font-size: 11px;
-  }
-
-  .status-btns {
-    display: flex;
-    gap: 5px;
-  }
-
-  .status-btn {
-    width: 32px;
-    height: 32px;
-    border-radius: 8px;
-    border: 1.5px solid var(--sand-dark);
-    background: var(--sand);
-    color: var(--muted);
-    font-size: 14px;
-    font-weight: 700;
-    cursor: pointer;
-    transition: all 0.15s;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  .status-btn:not(:disabled):hover {
-    border-color: var(--navy-light);
-    transform: scale(1.05);
-  }
-
-  .status-btn:disabled {
-    cursor: default;
-    opacity: 0.65;
-  }
-
-  .status-btn.active.yes {
-    background: var(--yes-bg);
-    border-color: var(--yes);
-    color: var(--yes);
-  }
-
-  .status-btn.active.no {
-    background: var(--no-bg);
-    border-color: var(--no);
-    color: var(--no);
-  }
-
-  .status-btn.active.tbd {
-    background: var(--tbd-bg);
-    border-color: var(--tbd);
-    color: var(--tbd);
-  }
+  /* COUPLES */
+  .couples-grid{display:grid;grid-template-columns:repeat(2,1fr);}
+  @media(min-width:480px){.couples-grid{grid-template-columns:repeat(3,1fr);}}
+  .couple-cell{padding:12px 12px 10px;border-right:1px solid var(--sand-dark);border-bottom:1px solid var(--sand-dark);}
+  .couple-cell:nth-child(2n){border-right:none;}
+  @media(min-width:480px){.couple-cell:nth-child(2n){border-right:1px solid var(--sand-dark);}.couple-cell:nth-child(3n){border-right:none;}}
+  .couple-cell.is-me{background:linear-gradient(135deg,#f0f8ff,#e8f4f0);}
+  .couple-name{font-size:12px;font-weight:700;color:var(--navy);margin-bottom:8px;line-height:1.3;}
+  .amp{font-weight:300;color:var(--muted);font-size:11px;}
+  .status-btns{display:flex;gap:5px;}
+  .status-btn{width:32px;height:32px;border-radius:8px;border:1.5px solid var(--sand-dark);background:var(--sand);color:var(--muted);font-size:14px;font-weight:700;cursor:pointer;transition:all .15s;display:flex;align-items:center;justify-content:center;}
+  .status-btn:not(:disabled):hover{border-color:var(--navy-light);transform:scale(1.05);}
+  .status-btn:disabled{cursor:default;opacity:.65;}
+  .status-btn.active.yes{background:var(--yes-bg);border-color:var(--yes);color:var(--yes);}
+  .status-btn.active.no{background:var(--no-bg);border-color:var(--no);color:var(--no);}
+  .status-btn.active.tbd{background:var(--tbd-bg);border-color:var(--tbd);color:var(--tbd);}
 
   /* GUESTS */
-  .guests-section {
-    padding: 10px 14px 12px;
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .guest-chips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    width: 100%;
-  }
-
-  .guest-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    background: var(--tbd-bg);
-    border: 1px solid #e8c87a;
-    color: var(--tbd);
-    border-radius: 20px;
-    padding: 3px 8px 3px 10px;
-    font-size: 12px;
-    font-weight: 700;
-  }
-
-  .guest-remove {
-    background: none;
-    border: none;
-    color: var(--tbd);
-    cursor: pointer;
-    font-size: 16px;
-    line-height: 1;
-    padding: 0;
-    opacity: 0.6;
-  }
-
-  .guest-remove:hover { opacity: 1; }
-
-  .add-guest-btn {
-    background: none;
-    border: 1.5px dashed var(--sand-dark);
-    color: var(--muted);
-    border-radius: 20px;
-    padding: 5px 12px;
-    font-size: 12px;
-    font-weight: 700;
-    cursor: pointer;
-    transition: all 0.15s;
-    font-family: 'Lato', sans-serif;
-  }
-
-  .add-guest-btn:hover {
-    border-color: var(--navy);
-    color: var(--navy);
-  }
+  .guests-section{padding:10px 14px 12px;border-top:1px solid var(--sand-dark);}
+  .guest-header-label{font-size:10px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted);margin-bottom:8px;}
+  .guest-chips{display:flex;flex-direction:column;gap:6px;margin-bottom:10px;}
+  .guest-chip{display:flex;align-items:center;justify-content:space-between;gap:8px;border-radius:10px;padding:8px 10px;border:1px solid;cursor:default;}
+  .guest-chip:hover .edit-hint{opacity:1;}
+  .edit-hint{font-size:10px;opacity:0;transition:opacity .2s;margin-left:2px;}
+  .guest-chip.manual{background:#fdf8ee;border-color:#e8c87a;}
+  .guest-chip.invited{background:#eef5f3;border-color:#9ecfc8;}
+  .guest-chip-main{display:flex;flex-direction:column;gap:2px;min-width:0;}
+  .guest-names{font-size:13px;font-weight:700;color:var(--text);}
+  .guest-meta{font-size:11px;color:var(--muted);}
+  .guest-remove{background:none;border:none;color:var(--muted);cursor:pointer;font-size:18px;line-height:1;padding:0 2px;flex-shrink:0;}
+  .guest-remove:hover{color:var(--no);}
+  .guest-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:2px;}
+  .add-guest-btn,.invite-btn{background:none;border:1.5px dashed var(--sand-dark);color:var(--muted);border-radius:20px;padding:5px 14px;font-size:12px;font-weight:700;cursor:pointer;transition:all .15s;font-family:'Lato',sans-serif;}
+  .add-guest-btn:hover{border-color:var(--navy);color:var(--navy);}
+  .invite-btn{border-color:#9ecfc8;color:var(--teal);}
+  .invite-btn:hover{border-style:solid;background:#eef5f3;}
 
   /* MODAL */
-  .modal-overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(26,46,74,0.5);
-    backdrop-filter: blur(3px);
-    z-index: 200;
-    display: none;
-    align-items: center;
-    justify-content: center;
-    padding: 20px;
-  }
+  .modal-overlay{position:fixed;inset:0;background:rgba(26,46,74,.5);backdrop-filter:blur(3px);z-index:200;display:none;align-items:flex-end;justify-content:center;}
+  @media(min-width:500px){.modal-overlay{align-items:center;padding:20px;}}
+  .modal-overlay.open{display:flex;}
+  .modal{background:white;border-radius:20px 20px 0 0;padding:24px;width:100%;max-width:440px;max-height:90vh;overflow-y:auto;box-shadow:0 -10px 40px rgba(0,0,0,.2);animation:slideUp .25s ease;}
+  @media(min-width:500px){.modal{border-radius:18px;animation:popIn .2s ease;}}
+  @keyframes slideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
+  @keyframes popIn{from{transform:scale(.95);opacity:0}to{transform:scale(1);opacity:1}}
+  .modal-title{font-family:'Playfair Display',serif;font-size:22px;color:var(--navy);margin-bottom:4px;}
+  .modal-wk{font-size:13px;color:var(--muted);margin-bottom:16px;}
+  .field-label{display:block;font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--navy);margin-bottom:6px;margin-top:14px;}
+  .field-hint{font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted);font-size:11px;}
+  .guest-textarea{width:100%;border:1.5px solid var(--sand-dark);border-radius:10px;padding:10px 14px;font-size:14px;font-family:'Lato',sans-serif;color:var(--text);outline:none;resize:vertical;background:var(--cream);transition:border-color .15s;}
+  .guest-textarea:focus{border-color:var(--navy);}
+  .rooms-stepper{display:flex;align-items:center;gap:14px;}
+  .stepper-btn{width:34px;height:34px;border-radius:50%;border:1.5px solid var(--sand-dark);background:var(--sand);color:var(--navy);font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1;}
+  .stepper-btn:hover{border-color:var(--navy);}
+  #g-rooms,#i-rooms{font-size:20px;font-weight:700;color:var(--navy);min-width:24px;text-align:center;}
+  .field-select{width:100%;border:1.5px solid var(--sand-dark);border-radius:10px;padding:10px 14px;font-size:14px;font-family:'Lato',sans-serif;color:var(--text);background:var(--cream);outline:none;}
+  .wk-checkbox-list{display:flex;flex-direction:column;gap:4px;max-height:200px;overflow-y:auto;border:1.5px solid var(--sand-dark);border-radius:10px;padding:8px;background:var(--cream);}
+  .wk-check-row{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;cursor:pointer;transition:background .15s;}
+  .wk-check-row.checked{background:var(--yes-bg);}
+  .wk-checkbox{accent-color:var(--yes);width:16px;height:16px;flex-shrink:0;}
+  .wk-check-text{font-size:13px;font-weight:600;}
+  .wk-check-text em{font-style:normal;color:var(--gold);font-size:11px;}
+  .modal-btns{display:flex;gap:10px;}
+  .modal-cancel{flex:1;padding:10px;border:1.5px solid var(--sand-dark);border-radius:10px;background:none;color:var(--muted);font-size:14px;font-weight:700;cursor:pointer;font-family:'Lato',sans-serif;}
+  .modal-confirm{flex:2;padding:10px;border:none;border-radius:10px;background:var(--navy);color:white;font-size:14px;font-weight:700;cursor:pointer;font-family:'Lato',sans-serif;transition:background .15s;}
+  .modal-confirm:hover{background:var(--navy-light);}
+  .invite-result{margin-top:16px;padding:14px;background:#eef5f3;border:1.5px solid #9ecfc8;border-radius:12px;}
+  .invite-result-label{font-size:12px;font-weight:700;color:var(--navy);margin-bottom:8px;}
+  .invite-link-box{display:flex;align-items:center;gap:8px;background:white;border:1px solid var(--sand-dark);border-radius:8px;padding:8px 10px;margin-bottom:8px;}
+  .invite-link-text{font-size:11px;color:var(--muted);word-break:break-all;flex:1;}
+  .copy-btn{background:var(--navy);color:white;border:none;border-radius:6px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;font-family:'Lato',sans-serif;}
+  .invite-result-hint{font-size:12px;color:var(--muted);line-height:1.4;}
+  .inline-error{margin-top:10px;padding:8px 12px;background:#fde8e5;border:1px solid #e8a09a;border-radius:8px;color:var(--no);font-size:13px;font-weight:700;}
 
-  .modal-overlay.open { display: flex; }
+  /* PICKER */
+  .picker-screen{min-height:100vh;background:var(--navy);display:flex;align-items:center;justify-content:center;padding:30px 20px;}
+  .picker-inner{text-align:center;max-width:420px;width:100%;}
+  .wave-line.large{font-size:14px;letter-spacing:4px;margin-bottom:6px;}
+  .picker-title{font-family:'Playfair Display',serif;font-size:52px;font-weight:900;color:white;line-height:1;margin-bottom:6px;}
+  .picker-sub{font-size:13px;font-weight:300;letter-spacing:4px;text-transform:uppercase;color:var(--sand-dark);margin-bottom:32px;}
+  .picker-prompt{font-size:14px;font-weight:300;letter-spacing:2px;text-transform:uppercase;color:rgba(255,255,255,.5);margin-bottom:20px;}
+  .picker-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+  .picker-btn{display:flex;flex-direction:column;align-items:center;gap:10px;background:rgba(255,255,255,.06);border:1.5px solid rgba(255,255,255,.12);color:white;border-radius:14px;padding:18px 12px;cursor:pointer;transition:all .2s;font-family:'Lato',sans-serif;}
+  .picker-btn:hover{background:rgba(255,255,255,.12);border-color:var(--gold);transform:translateY(-2px);}
+  .picker-initials{width:44px;height:44px;border-radius:50%;background:var(--gold);color:var(--navy);font-weight:900;font-size:15px;display:flex;align-items:center;justify-content:center;}
+  .picker-label{font-size:13px;font-weight:700;text-align:center;line-height:1.3;}
 
-  .modal {
-    background: white;
-    border-radius: 18px;
-    padding: 24px;
-    width: 100%;
-    max-width: 360px;
-    box-shadow: 0 20px 60px rgba(0,0,0,0.25);
-    animation: popIn 0.2s ease;
-  }
-
-  @keyframes popIn {
-    from { transform: scale(0.95); opacity: 0; }
-    to { transform: scale(1); opacity: 1; }
-  }
-
-  .modal-title {
-    font-family: 'Playfair Display', serif;
-    font-size: 22px;
-    color: var(--navy);
-    margin-bottom: 4px;
-  }
-
-  .modal-wk {
-    font-size: 13px;
-    color: var(--muted);
-    margin-bottom: 16px;
-  }
-
-  .guest-input {
-    width: 100%;
-    border: 1.5px solid var(--sand-dark);
-    border-radius: 10px;
-    padding: 10px 14px;
-    font-size: 15px;
-    font-family: 'Lato', sans-serif;
-    color: var(--text);
-    outline: none;
-    transition: border-color 0.15s;
-    background: var(--cream);
-    margin-bottom: 16px;
-  }
-
-  .guest-input:focus { border-color: var(--navy); }
-
-  .modal-btns { display: flex; gap: 10px; }
-
-  .modal-cancel {
-    flex: 1;
-    padding: 10px;
-    border: 1.5px solid var(--sand-dark);
-    border-radius: 10px;
-    background: none;
-    color: var(--muted);
-    font-size: 14px;
-    font-weight: 700;
-    cursor: pointer;
-    font-family: 'Lato', sans-serif;
-  }
-
-  .modal-confirm {
-    flex: 2;
-    padding: 10px;
-    border: none;
-    border-radius: 10px;
-    background: var(--navy);
-    color: white;
-    font-size: 14px;
-    font-weight: 700;
-    cursor: pointer;
-    font-family: 'Lato', sans-serif;
-    transition: background 0.15s;
-  }
-
-  .modal-confirm:hover { background: var(--navy-light); }
-
-  /* USER PICKER */
-  .picker-screen {
-    min-height: 100vh;
-    background: var(--navy);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 30px 20px;
-  }
-
-  .picker-inner {
-    text-align: center;
-    max-width: 420px;
-    width: 100%;
-  }
-
-  .wave-line.large {
-    font-size: 14px;
-    letter-spacing: 4px;
-    margin-bottom: 6px;
-  }
-
-  .picker-title {
-    font-family: 'Playfair Display', serif;
-    font-size: 52px;
-    font-weight: 900;
-    color: white;
-    line-height: 1;
-    margin-bottom: 6px;
-  }
-
-  .picker-sub {
-    font-size: 13px;
-    font-weight: 300;
-    letter-spacing: 4px;
-    text-transform: uppercase;
-    color: var(--sand-dark);
-    margin-bottom: 32px;
-  }
-
-  .picker-prompt {
-    font-size: 14px;
-    font-weight: 300;
-    letter-spacing: 2px;
-    text-transform: uppercase;
-    color: rgba(255,255,255,0.5);
-    margin-bottom: 20px;
-  }
-
-  .picker-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 12px;
-  }
-
-  .picker-btn {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 10px;
-    background: rgba(255,255,255,0.06);
-    border: 1.5px solid rgba(255,255,255,0.12);
-    color: white;
-    border-radius: 14px;
-    padding: 18px 12px;
-    cursor: pointer;
-    transition: all 0.2s;
-    font-family: 'Lato', sans-serif;
-  }
-
-  .picker-btn:hover {
-    background: rgba(255,255,255,0.12);
-    border-color: var(--gold);
-    transform: translateY(-2px);
-  }
-
-  .picker-initials {
-    width: 44px;
-    height: 44px;
-    border-radius: 50%;
-    background: var(--gold);
-    color: var(--navy);
-    font-weight: 900;
-    font-size: 15px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  .picker-label {
-    font-size: 13px;
-    font-weight: 700;
-    text-align: center;
-    line-height: 1.3;
-  }
-
-  #app { min-height: 100vh; }
+  /* INVITE PAGE */
+  .invite-screen{min-height:100vh;background:var(--navy);display:flex;align-items:center;justify-content:center;padding:30px 20px;}
+  .invite-box{text-align:center;max-width:420px;width:100%;}
+  .invite-sub{font-size:13px;font-weight:300;letter-spacing:4px;text-transform:uppercase;color:var(--sand-dark);margin-bottom:4px;}
+  .invite-from{color:white;font-size:18px;margin:16px 0 6px;}
+  .invite-address{color:rgba(255,255,255,.5);font-size:13px;margin-bottom:28px;}
+  .invite-pick-label{font-size:11px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:rgba(255,255,255,.4);margin-bottom:12px;}
+  .invite-weekends{display:flex;flex-direction:column;gap:10px;margin-bottom:16px;}
+  .invite-wk-btn{background:rgba(255,255,255,.07);border:1.5px solid rgba(255,255,255,.15);color:white;border-radius:12px;padding:14px 20px;font-size:16px;font-family:'Playfair Display',serif;font-weight:700;cursor:pointer;transition:all .2s;text-align:left;display:flex;flex-direction:column;gap:4px;}
+  .invite-wk-btn:hover{background:rgba(255,255,255,.13);border-color:var(--gold);}
+  .invite-wk-btn.selected{background:rgba(200,149,58,.2);border-color:var(--gold);}
+  .invite-wk-btn:disabled{opacity:.4;cursor:default;}
+  .invite-badge{font-size:10px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--gold);font-family:'Lato',sans-serif;}
+  .invite-wk-label{font-size:18px;}
+  .invite-confirm{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);border-radius:12px;padding:16px;margin-top:4px;}
+  .invite-confirm-text{color:white;font-size:14px;margin-bottom:12px;}
+  .invite-accept-btn{background:var(--gold);color:var(--navy);border:none;border-radius:10px;padding:13px 30px;font-size:15px;font-weight:700;cursor:pointer;font-family:'Lato',sans-serif;transition:opacity .2s;}
+  .invite-accept-btn:hover{opacity:.85;}
+  .invite-accepted{background:rgba(58,138,122,.15);border:1.5px solid #4a9b78;border-radius:12px;padding:20px;margin-top:4px;}
+  .accepted-msg{color:white;font-size:16px;margin-bottom:14px;}
+  .cal-btn{display:inline-block;background:white;color:var(--navy);border-radius:10px;padding:12px 22px;font-size:14px;font-weight:700;text-decoration:none;margin-bottom:10px;transition:opacity .2s;}
+  .cal-btn:hover{opacity:.85;}
+  .cal-note{color:rgba(255,255,255,.4);font-size:11px;}
+  #app{min-height:100vh;}
 </style>
 </head>
 <body>
   <div id="app">
-    <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;color:#7a8599;font-family:'Lato',sans-serif;">
-      Loading...
-    </div>
+    <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;color:#7a8599;font-family:'Lato',sans-serif;">Loading...</div>
   </div>
 </body>
 </html>
