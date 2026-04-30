@@ -120,12 +120,18 @@
       return;
     }
     const offered = (invite.weekendIds || []).map(id => getWeekendById(id)).filter(Boolean);
+    const allNames = (invite.guestNames || []);
+    const guestFirstNames = allNames.length === 1
+      ? allNames[0]
+      : allNames.slice(0, -1).join(', ') + ' & ' + allNames[allNames.length - 1];
     container.innerHTML = `
       <div class="invite-screen"><div class="invite-box">
         <div class="wave-line large">&#12316;&#12316;&#12316;&#12316;&#12316;</div>
         <h1 class="picker-title">Shore House</h1>
         <p class="invite-sub">Summer 2026</p>
-        <p class="invite-from"><strong>${getLabelById(invite.invitedBy)}</strong> is inviting you down to the shore!</p>
+        <p class="invite-from">Hey <strong>${guestFirstNames}</strong>! &#127796;</p>
+        <p class="invite-greeting"><strong>${getLabelById(invite.invitedBy)}</strong> is inviting you down to the shore!</p>
+        ${invite.message ? `<p class="invite-message">"${invite.message}"</p>` : ''}
         <p class="invite-address">&#128205; ${SHORE_ADDRESS}</p>
         <p class="invite-pick-label">Pick a weekend</p>
         <div class="invite-weekends" id="invite-weekends">
@@ -380,12 +386,12 @@
   let inviteWkIds = new Set();
 
   window.openInviteModal = function(defaultWkId) {
-    inviteWkIds = new Set([defaultWkId]);
+    inviteWkIds = new Set();
     document.getElementById('modal-overlay').classList.add('open');
     document.getElementById('modal-content').innerHTML = `
       <h3 class="modal-title">Invite Guests</h3>
       <p class="modal-wk">Create a shareable invite link</p>
-      <label class="field-label">Guest name(s) <span class="field-hint">one per line</span></label>
+      <label class="field-label">Guest name(s)</label>
       <textarea id="i-names" class="guest-textarea" rows="3" placeholder="John Smith&#10;Jane Smith"></textarea>
       <label class="field-label">Rooms needed</label>
       <div class="rooms-stepper">
@@ -396,12 +402,14 @@
       <label class="field-label">Offer these weekends <span class="field-hint">guest picks one</span></label>
       <div class="wk-checkbox-list">
         ${WEEKENDS.map(wk=>`
-          <label class="wk-check-row${wk.id===defaultWkId?' checked':''}" id="wkrow_${wk.id}">
-            <input type="checkbox" class="wk-checkbox" value="${wk.id}" ${wk.id===defaultWkId?'checked':''}
+          <label class="wk-check-row" id="wkrow_${wk.id}">
+            <input type="checkbox" class="wk-checkbox" value="${wk.id}"
               onchange="toggleInviteWk('${wk.id}',this.checked)">
             <span class="wk-check-text">${wk.badge?`<em>${wk.badge}</em> &middot; `:''}${wk.label}</span>
           </label>`).join('')}
       </div>
+      <label class="field-label">Personal message <span class="field-hint">optional</span></label>
+      <textarea id="i-message" class="guest-textarea" rows="2" placeholder="e.g. Would love to have you guys down for the holiday weekend!"></textarea>
       <div class="modal-btns" style="margin-top:18px;">
         <button class="modal-cancel" onclick="closeModal()">Cancel</button>
         <button class="modal-confirm" onclick="generateInviteLink()">Generate Link</button>
@@ -418,6 +426,7 @@
     const guestNames = (document.getElementById('i-names')?.value||'').split('\n').map(n=>n.trim()).filter(Boolean);
     const rooms = parseInt(document.getElementById('i-rooms')?.textContent)||1;
     const weekendIds = [...inviteWkIds];
+    const message = (document.getElementById('i-message')?.value||'').trim();
     const resultEl = document.getElementById('invite-link-result');
     if (!guestNames.length) {
       resultEl.innerHTML = `<p class="inline-error">Please enter at least one guest name.</p>`;
@@ -427,7 +436,7 @@
       resultEl.innerHTML = `<p class="inline-error">Please select at least one weekend.</p>`;
       return;
     }
-    const payload = { invitedBy: currentUser, guestNames, rooms, weekendIds, createdAt: Date.now(), accepted: false };
+    const payload = { invitedBy: currentUser, guestNames, rooms, weekendIds, message: message || null, createdAt: Date.now(), accepted: false };
     const key = `inv_${Date.now()}_${Math.random().toString(36).slice(2,7)}`;
     if (isFirebaseConnected) writeData(`invites2026/${key}`, payload);
     const link = `${window.location.origin}${window.location.pathname}?invite=${key}`;
@@ -615,7 +624,9 @@
   .invite-screen{min-height:100vh;background:var(--navy);display:flex;align-items:center;justify-content:center;padding:30px 20px;}
   .invite-box{text-align:center;max-width:420px;width:100%;}
   .invite-sub{font-size:13px;font-weight:300;letter-spacing:4px;text-transform:uppercase;color:var(--sand-dark);margin-bottom:4px;}
-  .invite-from{color:white;font-size:18px;margin:16px 0 6px;}
+  .invite-from{color:white;font-size:24px;margin:16px 0 4px;font-family:'Playfair Display',serif;}
+  .invite-greeting{color:rgba(255,255,255,0.7);font-size:15px;margin-bottom:10px;}
+  .invite-message{color:rgba(255,255,255,0.9);font-size:15px;font-style:italic;background:rgba(255,255,255,0.08);border-left:3px solid var(--gold);border-radius:0 8px 8px 0;padding:10px 14px;margin:0 0 16px;line-height:1.5;}
   .invite-address{color:rgba(255,255,255,.5);font-size:13px;margin-bottom:28px;}
   .invite-pick-label{font-size:11px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:rgba(255,255,255,.4);margin-bottom:12px;}
   .invite-weekends{display:flex;flex-direction:column;gap:10px;margin-bottom:16px;}
